@@ -6,21 +6,26 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"strings"
+	"syscall"
 	"time"
 )
 
 var (
-	addr            = os.Getenv("ADDR")
+	port            = os.Getenv("PORT")
 	timeoutDuration = 30 * time.Second
 )
 
 func init() {
-	if addr == "" {
-		addr = ":8080"
+	if port == "" {
+		port = ":8080"
+	} else {
+		port = fmt.Sprintf(":%s", port)
 	}
 }
 
@@ -42,15 +47,17 @@ func pathToRepo(urlPath string) (string, string, error) {
 
 	switch split[0] {
 	case "github":
-		fallthrough
-	case "github.com":
-		if len(split) < 3 {
-			return "", "", fmt.Errorf("could not parse github repo")
-		}
-		return fmt.Sprintf("https://github.com/%s/%s", split[1], split[2]), strings.Join(split[3:], "/"), nil
+		split[0] = "github.com"
+		break
+	case "gitlab":
+		split[0] = "gitlab.com"
 	}
 
-	return "", "", fmt.Errorf("unsupported git host")
+	if len(split) < 4 {
+		return "", "", fmt.Errorf("could not parse path")
+	}
+
+	return fmt.Sprintf("https://%s/%s/%s", split[0], split[1], split[2]), strings.Join(split[3:], "/"), nil
 }
 
 func handler(w http.ResponseWriter, req *http.Request) {
@@ -75,6 +82,12 @@ func handler(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	gitURL, err := url.Parse(repo)
+	if ok := handleErr(err, http.StatusInternalServerError, w); !ok {
+		return
+	}
+	gitURL.User = req.URL.User
+
 	dir, err := ioutil.TempDir("", "repo-*")
 	if ok := handleErr(err, http.StatusInternalServerError, w); !ok {
 		return
@@ -87,7 +100,7 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// TODO log the output
-	err = exec.CommandContext(ctx, gitPath, "clone", "--filter=blob:none", "--depth=1", "--sparse", repo, dir).Run()
+	err = exec.CommandContext(ctx, gitPath, "clone", "--filter=blob:none", "--depth=1", "--sparse", gitURL.String(), dir).Run()
 	if ok := handleErr(err, http.StatusInternalServerError, w); !ok {
 		return
 	}
@@ -153,8 +166,26 @@ func handler(w http.ResponseWriter, req *http.Request) {
 
 func main() {
 	http.HandleFunc("/", handler)
-	err := http.ListenAndServe(addr, nil)
-	if err != nil {
-		log.Fatal(err)
+
+	srv := &http.Server{Addr: port}
+
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+	log.Printf("starting git-delivery HTTP server on %s\n", port)
+
+	<-done
+
+	log.Println("shutting down HTTP server")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("failed to shutdown HTTP server:%+v", err)
 	}
 }
