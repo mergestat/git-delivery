@@ -38,11 +38,12 @@ func handleErr(err error, code int, w http.ResponseWriter) bool {
 	return true
 }
 
-func pathToRepo(urlPath string) (string, string, error) {
+func parseRepo(req *http.Request) (*url.URL, string, error) {
+	urlPath := req.URL.EscapedPath()
 	split := strings.Split(urlPath[1:], "/")
 
 	if len(split) == 0 {
-		return "", "", fmt.Errorf("invalid git repository")
+		return nil, "", fmt.Errorf("invalid git repository")
 	}
 
 	switch split[0] {
@@ -54,10 +55,19 @@ func pathToRepo(urlPath string) (string, string, error) {
 	}
 
 	if len(split) < 4 {
-		return "", "", fmt.Errorf("could not parse path")
+		return nil, "", fmt.Errorf("could not parse path")
 	}
 
-	return fmt.Sprintf("https://%s/%s/%s", split[0], split[1], split[2]), strings.Join(split[3:], "/"), nil
+	o, err := url.Parse(fmt.Sprintf("https://%s/%s/%s", split[0], split[1], split[2]))
+	if err != nil {
+		return nil, "", err
+	}
+
+	if user, pass, hasAuth := req.BasicAuth(); hasAuth {
+		o.User = url.UserPassword(user, pass)
+	}
+
+	return o, strings.Join(split[3:], "/"), nil
 }
 
 func handler(w http.ResponseWriter, req *http.Request) {
@@ -77,16 +87,10 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	ctx, close := context.WithTimeout(req.Context(), timeoutDuration)
 	defer close()
 
-	repo, filePath, err := pathToRepo(req.URL.EscapedPath())
+	repo, filePath, err := parseRepo(req)
 	if ok := handleErr(err, http.StatusUnprocessableEntity, w); !ok {
 		return
 	}
-
-	gitURL, err := url.Parse(repo)
-	if ok := handleErr(err, http.StatusInternalServerError, w); !ok {
-		return
-	}
-	gitURL.User = req.URL.User
 
 	dir, err := ioutil.TempDir("", "repo-*")
 	if ok := handleErr(err, http.StatusInternalServerError, w); !ok {
@@ -100,7 +104,7 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// TODO log the output
-	err = exec.CommandContext(ctx, gitPath, "clone", "--filter=blob:none", "--depth=1", "--sparse", gitURL.String(), dir).Run()
+	err = exec.CommandContext(ctx, gitPath, "clone", "--filter=blob:none", "--depth=1", "--sparse", repo.String(), dir).Run()
 	if ok := handleErr(err, http.StatusInternalServerError, w); !ok {
 		return
 	}
