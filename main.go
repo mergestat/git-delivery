@@ -17,15 +17,32 @@ import (
 )
 
 var (
-	port            = os.Getenv("PORT")
+	PORT         = os.Getenv("PORT")
+	ALLOW_AUTH   = os.Getenv("ALLOW_AUTH")
+	HTTP_TIMEOUT = os.Getenv("HTTP_TIMEOUT")
+)
+
+var (
+	allowAuth       = false
 	timeoutDuration = 30 * time.Second
 )
 
 func init() {
-	if port == "" {
-		port = ":8080"
+	if PORT == "" {
+		PORT = ":8080"
 	} else {
-		port = fmt.Sprintf(":%s", port)
+		PORT = fmt.Sprintf(":%s", PORT)
+	}
+
+	if ALLOW_AUTH == "1" || ALLOW_AUTH == "true" {
+		allowAuth = true
+	}
+
+	d, err := time.ParseDuration(HTTP_TIMEOUT)
+	if err != nil {
+		log.Printf("could not not parse timeout: %v", err)
+	} else {
+		timeoutDuration = d
 	}
 }
 
@@ -63,7 +80,7 @@ func parseRepo(req *http.Request) (*url.URL, string, error) {
 		return nil, "", err
 	}
 
-	if user, pass, hasAuth := req.BasicAuth(); hasAuth {
+	if user, pass, hasAuth := req.BasicAuth(); hasAuth && allowAuth {
 		o.User = url.UserPassword(user, pass)
 	}
 
@@ -171,7 +188,7 @@ func handler(w http.ResponseWriter, req *http.Request) {
 func main() {
 	http.HandleFunc("/", handler)
 
-	srv := &http.Server{Addr: port}
+	srv := &http.Server{Addr: PORT}
 
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -181,7 +198,7 @@ func main() {
 			log.Fatalf("listen: %s\n", err)
 		}
 	}()
-	log.Printf("starting git-delivery HTTP server on %s\n", port)
+	log.Printf("starting git-delivery HTTP server on %s\n", PORT)
 
 	<-done
 
