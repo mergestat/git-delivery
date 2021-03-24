@@ -1,4 +1,3 @@
-
 FROM golang:1.16 as builder
 WORKDIR /app
 COPY . .
@@ -9,7 +8,6 @@ FROM ubuntu:hirsute
 WORKDIR /app/
 COPY --from=builder /app/main .
 
-# RUN add-apt-repository ppa:git-core/ppa
 RUN apt-get update && apt-get install -y git
 
 ENTRYPOINT [ "./main" ]
