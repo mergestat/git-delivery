@@ -1,4 +1,5 @@
 [![TODOs](https://badgen.net/https/api.tickgit.com/badgen/github.com/augmentable-dev/git-delivery?branch=main)](https://www.tickgit.com/browse?repo=github.com/augmentable-dev/git-delivery&branch=main)
+[![Go Report Card](https://goreportcard.com/badge/github.com/augmentable-dev/git-delivery)](https://goreportcard.com/report/github.com/augmentable-dev/git-delivery)
 
 # git-delivery
 
