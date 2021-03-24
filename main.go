@@ -17,9 +17,10 @@ import (
 )
 
 var (
-	PORT         = os.Getenv("PORT")
-	ALLOW_AUTH   = os.Getenv("ALLOW_AUTH")
-	HTTP_TIMEOUT = os.Getenv("HTTP_TIMEOUT")
+	PORT          = os.Getenv("PORT")
+	ALLOW_AUTH    = os.Getenv("ALLOW_AUTH")
+	HTTP_TIMEOUT  = os.Getenv("HTTP_TIMEOUT")
+	ROOT_REDIRECT = os.Getenv("ROOT_REDIRECT")
 )
 
 var (
@@ -38,11 +39,16 @@ func init() {
 		allowAuth = true
 	}
 
-	d, err := time.ParseDuration(HTTP_TIMEOUT)
-	if err != nil {
-		log.Printf("could not not parse timeout: %v", err)
-	} else {
+	if HTTP_TIMEOUT != "" {
+		d, err := time.ParseDuration(HTTP_TIMEOUT)
+		if err != nil {
+			log.Printf("could not not parse timeout: %v", err)
+		}
 		timeoutDuration = d
+	}
+
+	if ROOT_REDIRECT == "" {
+		ROOT_REDIRECT = "https://github.com/augmentable-dev/git-delivery"
 	}
 }
 
@@ -103,6 +109,11 @@ func handler(w http.ResponseWriter, req *http.Request) {
 
 	ctx, close := context.WithTimeout(req.Context(), timeoutDuration)
 	defer close()
+
+	if req.URL.EscapedPath() == "/" {
+		http.Redirect(w, req, ROOT_REDIRECT, http.StatusPermanentRedirect)
+		return
+	}
 
 	repo, filePath, err := parseRepo(req)
 	if ok := handleErr(err, http.StatusUnprocessableEntity, w); !ok {
@@ -198,7 +209,7 @@ func main() {
 			log.Fatalf("listen: %s\n", err)
 		}
 	}()
-	log.Printf("starting git-delivery HTTP server on %s\n", PORT)
+	log.Printf("starting git-delivery HTTP server on %s with %s request timeout\n", PORT, timeoutDuration)
 
 	<-done
 
